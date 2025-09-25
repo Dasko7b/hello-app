@@ -1,67 +1,68 @@
-name: CI/CD Build and Update Manifests
+name: CI/CD Pipeline (com SSH)
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      # 1. Faz o checkout do código da aplicação
+      - name: Checkout código da aplicação
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
+      # 2. Faz login no Docker Hub
+      - name: Login no Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/hello-app:latest
-            ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ github.sha }}
+      # 3. Constrói e envia a imagem Docker
+      - name: Build e Push da imagem Docker
+        run: |
+          IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/hello-app
+          TAG=$(date +%s)
+          echo "Nova tag de imagem: $TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          docker build -t $IMAGE_NAME:$TAG .
+          docker push $IMAGE_NAME:$TAG
 
-      - name: Prepare SSH for manifests repo
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      # 4. Configura a chave SSH para autenticação
+      - name: Configurar chave SSH
+        run: |
+          mkdir -p ~/.ssh/
+          # Escreve a chave privada do segredo para um arquivo
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          # Define as permissões corretas para a chave
+          chmod 600 ~/.ssh/id_rsa
+          # Adiciona o host do GitHub aos hosts conhecidos para evitar prompts interativos
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Checkout manifests repo
+      # 5. Clona o repositório de manifests usando a URL SSH
+      - name: Clonar repositório de manifests via SSH
         uses: actions/checkout@v4
         with:
-          repository: ${{ secrets.MANIFESTS_REPO }} # e.g. user/hello-manifests
-          path: manifests
-          persist-credentials: false
-          ssh-strict: true
-
-      - name: Install yq
+          # ATENÇÃO: Use a URL SSH do seu repositório aqui
+          repository: Dasko7b/hello-manifests
+          # Clona para um diretório separado
+          path: .
+      # 6. Atualiza o deployment e faz o push usando a autenticação SSH já configurada
+      - name: Atualizar Deployment com nova imagem
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-          yq --version
-
-      - name: Update manifest image tag
-        run: |
-          IMAGE=${{ secrets.DOCKER_USERNAME }}/hello-app:${{ github.sha }}
-          yq eval -i ".spec.template.spec.containers[0].image = strenv(IMAGE)" manifests/deployment.yaml
-          cd manifests
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cd ./manifests
+          sed -i "s|image:.*|image: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ env.TAG }}|g" deployment.yaml
+          
+          # Configura o Git com as informações do bot
           git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Adiciona, commita e envia as alterações
           git add deployment.yaml
-          git commit -m "ci: update image to $IMAGE"
-          git push origin main
-        env:
-          IMAGE: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ github.sha }}
+          git commit -m "CI: Atualizando imagem para a tag ${{ env.TAG }}"
+          
+          # O Git usará automaticamente a chave SSH configurada no passo 4
+          git push
