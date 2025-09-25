@@ -6,7 +6,7 @@ on:
 
 env:
   IMAGE_NAME: hello-app
-  MANIFESTS_REPO: git@github.com:Dasko7b/hello-manifests.git
+  MANIFESTS_REPO_SSH: git@github.com:Dasko7b/hello-manifests.git
   MANIFESTS_BRANCH: main
 
 jobs:
@@ -74,18 +74,17 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout manifests repo via SSH
-        uses: actions/checkout@v4
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
         with:
-          repository: ${{ env.MANIFESTS_REPO }}
-          ref: ${{ env.MANIFESTS_BRANCH }}
-          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          path: manifests-repo
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Configure Git
+      - name: Checkout manifests repo via SSH
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git clone ${{ env.MANIFESTS_REPO_SSH }} manifests-repo
+          cd manifests-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Create new branch for update
         run: |
@@ -102,7 +101,7 @@ jobs:
           
           # Verifica se o arquivo existe
           if [ ! -f "deployment.yaml" ]; then
-            echo "❌ deployment.yaml not found!"
+            echo "❌ deployment.yaml not found! Available files:"
             ls -la
             exit 1
           fi
