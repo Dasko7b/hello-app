@@ -3,13 +3,10 @@ name: CI/CD Pipeline - FastAPI App
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 env:
   IMAGE_NAME: hello-app
-  DOCKER_REGISTRY: docker.io
-  MANIFESTS_REPO: Dasko7b/hello-manifests
+  MANIFESTS_REPO: git@github.com:Dasko7b/hello-manifests.git
   MANIFESTS_BRANCH: main
 
 jobs:
@@ -40,12 +37,18 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-      image_name: ${{ steps.meta.outputs.tags }}
+      image_tag: ${{ steps.generate-tag.outputs.tag }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Generate tag
+        id: generate-tag
+        run: |
+          TAG="${GITHUB_SHA:0:7}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Generated tag: $TAG"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -56,71 +59,87 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix={{date 'YYYYMMDD'}}-,
-            latest
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.generate-tag.outputs.tag }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Output image tag
-        run: |
-          echo "Image tags: ${{ steps.meta.outputs.tags }}"
-          echo "First tag: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}"
-
-  update-manifests:
+  create-pr-for-manifests:
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout manifests repo
+      - name: Checkout manifests repo via SSH
         uses: actions/checkout@v4
         with:
           repository: ${{ env.MANIFESTS_REPO }}
           ref: ${{ env.MANIFESTS_BRANCH }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: manifests
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          path: manifests-repo
 
       - name: Configure Git
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Get image tag from previous job
-        id: get-tag
+      - name: Create new branch for update
         run: |
-          # Extrai a primeira tag da lista
-          TAGS='${{ needs.build-and-push.outputs.image_tag }}'
-          FIRST_TAG=$(echo "$TAGS" | cut -d',' -f1)
-          echo "FIRST_TAG=$FIRST_TAG" >> $GITHUB_OUTPUT
-          echo "Using tag: $FIRST_TAG"
+          cd manifests-repo
+          BRANCH_NAME="update-image-${{ needs.build-and-push.outputs.image_tag }}"
+          git checkout -b $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
       - name: Update image tag in deployment.yaml
         run: |
-          cd manifests
-          NEW_IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.get-tag.outputs.FIRST_TAG }}"
+          cd manifests-repo
+          NEW_IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}"
           echo "Updating image to: $NEW_IMAGE"
-          sed -i "s|image:.*|image: $NEW_IMAGE|" deployment.yaml
           
-          # Exibe o conteúdo atualizado para debug
-          echo "Updated deployment.yaml:"
+          # Verifica se o arquivo existe
+          if [ ! -f "deployment.yaml" ]; then
+            echo "❌ deployment.yaml not found!"
+            ls -la
+            exit 1
+          fi
+          
+          # Atualiza a tag da imagem
+          sed -i "s|image:.*|image: $NEW_IMAGE|g" deployment.yaml
+          
+          echo "✅ Updated deployment.yaml:"
           cat deployment.yaml
 
-      - name: Commit and push changes
+      - name: Commit changes
         run: |
-          cd manifests
+          cd manifests-repo
           git add deployment.yaml
           git status
-          git commit -m "CI: Update image to ${{ steps.get-tag.outputs.FIRST_TAG }} [skip ci]"
-          git push origin ${{ env.MANIFESTS_BRANCH }}
+          git commit -m "CI: Update image to ${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Push branch to remote
+        run: |
+          cd manifests-repo
+          git push origin ${{ env.BRANCH_NAME }}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: manifests-repo
+          branch: ${{ env.BRANCH_NAME }}
+          base: ${{ env.MANIFESTS_BRANCH }}
+          title: "CI: Update image to ${{ needs.build-and-push.outputs.image_tag }}"
+          body: |
+            Automatic PR generated by CI/CD pipeline
+            
+            - **New image**: `${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}`
+            - **Source commit**: ${{ github.sha }}
+            - **Triggered by**: ${{ github.actor }}
+            
+            This PR updates the Docker image tag in the deployment manifest.
+          labels: "ci-cd,automated"
+          delete-branch: true
