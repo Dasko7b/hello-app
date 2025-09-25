@@ -31,38 +31,30 @@ jobs:
           docker build -t $IMAGE_NAME:$TAG .
           docker push $IMAGE_NAME:$TAG
 
-      # 4. Configura a chave SSH para autenticação
-      - name: Configurar chave SSH
-        run: |
-          mkdir -p ~/.ssh/
-          # Escreve a chave privada do segredo para um arquivo
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          # Define as permissões corretas para a chave
-          chmod 600 ~/.ssh/id_rsa
-          # Adiciona o host do GitHub aos hosts conhecidos para evitar prompts interativos
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      # 4. Configura o SSH Agent com a chave privada
+      - name: Configurar SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # 5. Clona o repositório de manifests usando a URL SSH
+      # 5. Clona o repositório de manifests usando SSH em um diretório separado
       - name: Clonar repositório de manifests via SSH
         uses: actions/checkout@v4
         with:
-          # ATENÇÃO: Use a URL SSH do seu repositório aqui
           repository: Dasko7b/hello-manifests
-          # Clona para um diretório separado
-          path: .
-      # 6. Atualiza o deployment e faz o push usando a autenticação SSH já configurada
+          path: manifests  # diretório separado
+
+      # 6. Atualiza o deployment e faz o push
       - name: Atualizar Deployment com nova imagem
         run: |
-          cd .
+          cd manifests
           sed -i "s|image:.*|image: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ env.TAG }}|g" deployment.yaml
           
-          # Configura o Git com as informações do bot
+          # Configura o Git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Adiciona, commita e envia as alterações
+          # Comita e envia
           git add deployment.yaml
           git commit -m "CI: Atualizando imagem para a tag ${{ env.TAG }}"
-          
-          # O Git usará automaticamente a chave SSH configurada no passo 4
-          git push
+          git push origin main
