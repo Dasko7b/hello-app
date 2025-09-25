@@ -53,7 +53,7 @@ jobs:
       # 6. Atualiza o deployment e faz o push usando a autenticação SSH já configurada
       - name: Atualizar Deployment com nova imagem
         run: |
-          cd ./manifests
+          cd .
           sed -i "s|image:.*|image: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ env.TAG }}|g" deployment.yaml
           
           # Configura o Git com as informações do bot
