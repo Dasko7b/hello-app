@@ -9,7 +9,7 @@ on:
 env:
   IMAGE_NAME: hello-app
   DOCKER_REGISTRY: docker.io
-  MANIFESTS_REPO: seu-usuario/hello-manifests
+  MANIFESTS_REPO: Dasko7b/hello-manifests
   MANIFESTS_BRANCH: main
 
 jobs:
