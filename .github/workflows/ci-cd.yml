@@ -6,7 +6,7 @@ on:
 
 env:
   IMAGE_NAME: hello-app
-  MANIFESTS_REPO_SSH: git@github.com:Dasko7b/hello-manifests.git
+  MANIFESTS_REPO: Dasko7b/hello-manifests
   MANIFESTS_BRANCH: main
 
 jobs:
@@ -74,14 +74,26 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Checkout manifests repo via SSH
+      - name: Setup SSH key manually
         run: |
-          git clone ${{ env.MANIFESTS_REPO_SSH }} manifests-repo
+          # Criar diretório .ssh
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Salvar a chave privada
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Configurar known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          
+          # Testar conexão
+          ssh -T git@github.com
+
+      - name: Checkout manifests repo
+        run: |
+          git clone git@github.com:${{ env.MANIFESTS_REPO }}.git manifests-repo
           cd manifests-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -99,16 +111,13 @@ jobs:
           NEW_IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}"
           echo "Updating image to: $NEW_IMAGE"
           
-          # Verifica se o arquivo existe
           if [ ! -f "deployment.yaml" ]; then
             echo "❌ deployment.yaml not found! Available files:"
             ls -la
             exit 1
           fi
           
-          # Atualiza a tag da imagem
           sed -i "s|image:.*|image: $NEW_IMAGE|g" deployment.yaml
-          
           echo "✅ Updated deployment.yaml:"
           cat deployment.yaml
 
@@ -138,7 +147,5 @@ jobs:
             - **New image**: `${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}`
             - **Source commit**: ${{ github.sha }}
             - **Triggered by**: ${{ github.actor }}
-            
-            This PR updates the Docker image tag in the deployment manifest.
           labels: "ci-cd,automated"
           delete-branch: true
