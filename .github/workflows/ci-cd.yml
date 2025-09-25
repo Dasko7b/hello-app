@@ -1,69 +1,98 @@
-name: CI/CD Pipeline 
+name: CI/CD Pipeline - FastAPI App
 
 on:
   push:
     branches: [ main ]
- 
+  pull_request:
+    branches: [ main ]
+
+env:
+  IMAGE_NAME: hello-app
+  DOCKER_REGISTRY: docker.io
+  MANIFESTS_REPO: Dasko7b/hello-manifests
+  MANIFESTS_BRANCH: main
+
 jobs:
-  build-and-push:
+  build-and-test:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Login to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn
 
-    - name: Build and push Docker image
-      id: docker_build
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ github.sha }}
+      - name: Run tests (exemplo simples)
+        run: |
+          python -c "from main import app; import sys; sys.exit(0)"  # teste de importação
 
-    # 👇 Mover Setup SSH Key AQUI, antes do checkout do outro repo
-    - name: Setup SSH key
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        ssh-keyscan github.com >> ~/.ssh/known_hosts
-      shell: bash
+  build-and-push:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
 
-    # 👇 Checkout do repositório de manifests agora usa a chave já configurada
-    - name: Clone manifests repository
-      uses: actions/checkout@v3
-      with:
-        repository: MuriloPetri/meu-projeto-manifests
-        path: ./manifests
-        persist-credentials: false  # 👈 impede conflito de credenciais
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set git remote to SSH
-      run: git remote set-url origin git@github.com:MuriloPetri/meu-projeto-manifests.git
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Update image tag in Kubernetes manifest
-      run: |
-        sed -i 's|image:.*|image: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ github.sha }}|g' ./manifests/deployment.yaml
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix={{date 'YYYYMMDD'}}-,suffix=-{{sha}}
+            latest
 
-    - name: Test SSH connection
-      run: ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no git@github.com || true
-      
-    - name: Commit and push changes
-      run: |
-        cd ./manifests
-        git remote set-url origin git@github.com:MuriloPetri/meu-projeto-manifests.git
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add deployment.yaml
-        git commit -m "Update image tag to ${{ github.sha }}"
-        git push origin main
-      env:
-        GIT_SSH_COMMAND: "ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no"
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  update-manifests:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout manifests repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MANIFESTS_REPO }}
+          ref: ${{ env.MANIFESTS_BRANCH }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: manifests
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: Update image tag in deployment.yaml
+        run: |
+          NEW_TAG="${{ fromJSON(steps.meta.outputs.json).tags[0] }}"
+          sed -i "s|image:.*|image: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${NEW_TAG}|" manifests/deployment.yaml
+
+      - name: Commit and push changes
+        run: |
+          cd manifests
+          git add deployment.yaml
+          git commit -m "CI: Update image to ${{ fromJSON(steps.meta.outputs.json).tags[0] }}"
+          git push origin ${{ env.MANIFESTS_BRANCH }}
