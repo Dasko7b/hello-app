@@ -32,6 +32,7 @@ O projeto é estruturado em dois repositórios Git distintos para seguir as melh
     * Contém o código-fonte da aplicação FastAPI (`main.py`).
     * Inclui o `Dockerfile` para construir a imagem da aplicação.
     * Armazena o workflow do GitHub Actions (`.github/workflows/ci-cd.yaml`) que automatiza o processo de CI.
+    **Nota:** Não esquece de definir os secrets no seu GitHub.
 
 2.  **`hello-manifests` (Repositório de Manifestos):**
     * Contém os manifestos Kubernetes (`deployment.yaml` e `service.yaml`) que descrevem o estado desejado da aplicação no cluster.
