@@ -4,4 +4,4 @@ app = FastAPI()
 
 @app.get("/")
 async def root():
-    return {"message": "Hellow2 from FastAPIdasdasdas323233223"}
+    return {"message": "Hellow2 from FastAPId"}
