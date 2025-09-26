@@ -76,7 +76,9 @@ A resposta esperada é a mensagem definida no arquivo `main.py`, como `{"message
 ![Mensagem](assets/mensagem.png)
 
 E no ArgoCD
-![ArgoCD](assets/mage.png)
+![ArgoCD](assets/image.png)
+
+
 ## Autor
 
 * Dyego Dasko
