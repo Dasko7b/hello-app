@@ -1,95 +1,62 @@
-name: CI/CD Pipeline - FastAPI App
+name: CI/CD Pipeline for Hello App
 
 on:
   push:
-    branches: [ main ]
-
-env:
-  IMAGE_NAME: hello-app
-  MANIFESTS_REPO: Dasko7b/manifests # <-- Verifique se o nome do repo está certo
-  MANIFESTS_BRANCH: main
+    branches:
+      - main
 
 jobs:
-  # Este job faz a verificação inicial e os testes
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install fastapi uvicorn
-
-      - name: Run tests (check if app imports)
-        run: |
-          python -c "from main import app; print('App imported successfully')"
-
-  # Este job constrói e envia a imagem para o Docker Hub
   build-and-push:
-    needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    outputs:
-      image_tag: ${{ steps.generate-tag.outputs.tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Generate image tag
-        id: generate-tag
-        run: |
-          TAG="${GITHUB_SHA:0:7}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Log in to Docker Hub
+      - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Get commit hash
+        id: commit
+        uses: pr-mpt/actions-commit-hash@v2
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
+          file: ./Dockerfile
           push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.generate-tag.outputs.tag }}
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ steps.commit.outputs.short }}
 
-  # Este job atualiza os manifestos e cria o Pull Request
-  create-pr-for-manifests:
+  create-pull-request:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     steps:
-      - name: Checkout manifests repo
-        uses: actions/checkout@v4
+      - name: Checkout manifests repository
+        uses: actions/checkout@v3
         with:
-          repository: ${{ env.MANIFESTS_REPO }}
-          path: manifests-repo
-          token: ${{ secrets.GH_PAT }} # <-- Usando um Personal Access Token
+          repository: Dasko7b/hello-manifests 
+          token: ${{ secrets.PAT }}
+
+      - name: Get commit hash
+        id: commit
+        uses: pr-mpt/actions-commit-hash@v2
 
       - name: Update image tag in deployment.yaml
         run: |
-          cd manifests-repo
-          NEW_IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}"
-          sed -i "s|image:.*|image: $NEW_IMAGE|g" deployment.yaml
+          sed -i 's|image:.*|image: ${{ secrets.DOCKER_USERNAME }}/hello-app:${{ steps.commit.outputs.short }}|g' deployment.yaml
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v4
         with:
-          token: ${{ secrets.GH_PAT }} 
-          path: manifests-repo
-          commit-message: "CI: Atualiza imagem para ${{ needs.build-and-push.outputs.image_tag }}"
-          branch: "update-image-${{ needs.build-and-push.outputs.image_tag }}"
-          base: ${{ env.MANIFESTS_BRANCH }}
-          title: "CI: Atualiza imagem para ${{ needs.build-and-push.outputs.image_tag }}"
-          body: "Pull Request automático gerado pelo pipeline de CI/CD."
-          delete-branch: true
+          token: ${{ secrets.GH_PAT }}
+          commit-message: "chore: update image tag to ${{ steps.commit.outputs.short }}"
+          title: "Update Image to Version ${{ steps.commit.outputs.short }}"
+          body: "This PR updates the application image to the latest version built by the CI pipeline."
+          branch: "update-image-${{ steps.commit.outputs.short }}"
+          base: "main"
