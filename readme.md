@@ -73,11 +73,13 @@ Para acessar a aplicação que está rodando no cluster Kubernetes local, utiliz
     http://localhost:8080/
     ```
 
-A resposta esperada é a mensagem definida no arquivo `main.py`, como `{"message": "Hello World"}`.
-![Mensagem](assets/mensagem.png)
+    A resposta esperada é a mensagem definida no arquivo `main.py`, como `{"message": "Hello World"}`.
+    
+    ![Mensagem](assets/mensagem.png)
 
-E no ArgoCD
-![ArgoCD](assets/image.png)
+    E no ArgoCD
+
+    ![ArgoCD](assets/image.png)
 
 
 ## Autor
