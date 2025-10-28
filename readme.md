@@ -75,11 +75,11 @@ Para acessar a aplicação que está rodando no cluster Kubernetes local, utiliz
 
     A resposta esperada é a mensagem definida no arquivo `main.py`, como `{"message": "Hello World"}`.
     
-    ![Menssagem da API](mensagem.png)
+    ![MenssagemAPI](https://raw.githubusercontent.com/Dasko7b/hello-app/main/mensagem.png)
 
     E no ArgoCD
 
-    ![ArgoCD Sucess](image.png)
+    ![MenssagemAPI](https://raw.githubusercontent.com/Dasko7b/hello-app/main/image.png)
 
 
 ## Autor
