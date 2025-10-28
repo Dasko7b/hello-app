@@ -37,6 +37,7 @@ O projeto é estruturado em dois repositórios Git distintos para seguir as melh
 2.  **`hello-manifests` (Repositório de Manifestos):**
     * Contém os manifestos Kubernetes (`deployment.yaml` e `service.yaml`) que descrevem o estado desejado da aplicação no cluster.
     * Este repositório é monitorado pelo ArgoCD, que aplica qualquer alteração diretamente no ambiente.
+    * https://github.com/Dasko7b/hello-manifests
 
 ## Fluxo do CI/CD
 
